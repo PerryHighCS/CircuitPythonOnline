@@ -51,16 +51,13 @@ pixels.fill((0, 0, 255))</textarea>
   <button id="cleanup" disabled>Clean Up Files</button>
 
   <script>
-    window.addEventListener("unhandledrejection", event => {
-      console.error("⚠️ Unhandled Promise Rejection:", event.reason);
-    });
-
     const CTRL_A = 0x01; // Enter raw REPL
     const CTRL_B = 0x02; // Exit raw REPL
     const CTRL_C = 0x03; // Break
     const CTRL_D = 0x04; // Execute
 
-    let port, writer, reader;
+    let port, writer, reader, decoder;
+    let pipePromise;
     let outputBuffer = "";
     let stopReading = false;
     let readLoopPromise = null;
@@ -71,8 +68,12 @@ pixels.fill((0, 0, 255))</textarea>
         
         await port.open({ baudRate: 115200 });
 
-        const decoder = new TextDecoderStream();
-        port.readable.pipeTo(decoder.writable);
+        decoder = new TextDecoderStream();
+        pipePromise = port.readable.pipeTo(decoder.writable).catch(err => {
+          if (!stopReading) {
+            console.warn("pipeTo() stream error caught:", err);
+          }
+        });
         reader = decoder.readable.getReader();
 
         writer = port.writable.getWriter();
@@ -87,8 +88,6 @@ pixels.fill((0, 0, 255))</textarea>
     }
 
     async function disconnectPort() {
-      console.log("🔌 disconnectPort() called");
-
       if (!port) return false; // No port to disconnect
 
       stopReading = true;
@@ -96,23 +95,33 @@ pixels.fill((0, 0, 255))</textarea>
       try {
         if (reader) {
           await reader.cancel();
-          if (readLoopPromise) await readLoopPromise;
+          if (readLoopPromise) {
+            await readLoopPromise.catch(e => {
+              console.warn("Caught readLoop rejection during disconnect:", e);
+            });
+          }
+          await reader.releaseLock();
         }
       } catch (e) {
-        console.warn("Reader cancel/readLoop failed:", e);
-
-      }
-
-      try {
-        if (reader) await reader.releaseLock();
-      } catch (e) {
-        console.warn("Reader releaseLock failed:", e);
+        console.warn("Reader cleanup failed:", e);
       }
 
       try {
         if (writer) await writer.releaseLock();
       } catch (e) {
         console.warn("Writer releaseLock failed:", e);
+      }
+
+      try {
+        if (pipePromise) await pipePromise;
+      } catch (e) {
+        console.warn("pipePromise final rejection:", e);
+      }
+
+      try {
+        if (decoder) await decoder.writable.abort();
+      } catch (e) {
+        console.warn("Decoder cancel failed:", e);
       }
 
       await delay(500); // Let browser/USB settle
@@ -123,7 +132,7 @@ pixels.fill((0, 0, 255))</textarea>
         console.warn("Port close failed:", e);
       }
 
-      // ✅ Clear everything
+      // Clear everything
       port = null;
       reader = null;
       writer = null;
@@ -213,18 +222,22 @@ pixels.fill((0, 0, 255))</textarea>
           }
         }
       } catch (e) {
-        setStatus("Read error: " + e);
-        if (!stopReading && e instanceof DOMException && e.name === "NetworkError") {
-          monitorPortDisconnect();
+        if (!stopReading) {
+          console.error("readLoop error:", e);
+          setStatus("Read error: " + e);
+          if (e instanceof DOMException && e.name === "NetworkError") {
+            monitorPortDisconnect();
+          }
         }
       } finally {
         try {
-          await reader.releaseLock();
+          await reader.releaseLock(); // still clean up here
         } catch (e) {
-          console.warn("reader.releaseLock failed in finally:", e);
+          console.warn("reader.releaseLock failed:", e);
         }
       }
     }
+
 
     function delay(ms) {
       return new Promise(resolve => setTimeout(resolve, ms));
@@ -295,24 +308,29 @@ pixels.fill((0, 0, 255))</textarea>
     }
 
     async function ensureREPL() {
-      for (let attempt = 0; attempt < 3; attempt++) {
-        outputBuffer = ""; // Clear buffer before each attempt
+      try {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          outputBuffer = ""; // Clear buffer before each attempt
 
-        setStatus(`Checking for REPL prompt (attempt ${attempt + 1})...\n`);
-        await send("\r\n");
-        await delay(100);
-        const hasPrompt = await checkForPrompt();
-        if (hasPrompt) return true;
+          setStatus(`Checking for REPL prompt (attempt ${attempt + 1})...\n`);
+          await send("\r\n");
+          await delay(100);
+          const hasPrompt = await checkForPrompt();
+          if (hasPrompt) return true;
 
-        setStatus("Prompt not found, sending Ctrl-C...\n");
-        await sendControlByte(CTRL_C); // Break
-        await delay(100);
-        const afterCtrlCPrompt = await checkForPrompt();
-        if (afterCtrlCPrompt) return true;
+          setStatus("Prompt not found, sending Ctrl-C...\n");
+          await sendControlByte(CTRL_C); // Break
+          await delay(100);
+          const afterCtrlCPrompt = await checkForPrompt();
+          if (afterCtrlCPrompt) return true;
+        }
+
+        setStatus("REPL prompt not detected after multiple attempts.\n");
+        return false;
+      } catch (e) {
+        setStatus("Error while checking for REPL: " + e);
+        return false;
       }
-
-      setStatus("REPL prompt not detected after multiple attempts.\n");
-      return false;
     }
 
     async function uploadFile() {
@@ -452,13 +470,16 @@ delete_recursive("/")
     });
 
     document.getElementById("connect").addEventListener("click", async () => {
-      if (port && port.readable) {
-        await disconnectPort();
-      } else {
-        await connectSerial();
+      try {
+        if (port && port.readable) {
+          await disconnectPort();
+        } else {
+          await connectSerial();
+        }
+      } catch (e) {
+        setStatus("Connection error: " + e);
       }
     });
-
 
     document.getElementById("upload").addEventListener("click", uploadFile);
     document.getElementById("run").addEventListener("click", runFile);
