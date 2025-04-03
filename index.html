@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CPX WebSerial Console (Raw REPL Mode)</title>
+  <style>
+    body { font-family: sans-serif; padding: 1rem; }
+    textarea, pre, input, button { width: 100%; margin-top: 0.5rem; font-family: monospace; }
+    textarea { height: 200px; }
+    pre { height: 200px; overflow-y: auto; background: #f0f0f0; padding: 1rem; }
+    #file-list { font-size: 0.9rem; background: #e8e8e8; padding: 0.5rem; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>Circuit Playground WebSerial - Raw REPL</h1>
+  <button id="connect">Connect to Circuit Playground</button>
+  <br>
+  <label for="filename">Filename:</label>
+  <input type="text" id="filename" value="sample.py">
+  <label for="code">Code:</label>
+  <textarea id="code">import board, neopixel
+pixels = neopixel.NeoPixel(board.NEOPIXEL, 10, brightness=.2)
+pixels.fill((0, 0, 255))
+print('Circuit Playground Express')</textarea>
+  <button id="upload">Upload File</button>
+  <button id="run">Run Code</button>
+  <h3>Device Output:</h3>
+  <pre id="output"></pre>
+
+  <h3>Files on Device (Experimental)</h3>
+  <button id="list-files">List Files</button>
+  <pre id="file-list"></pre>
+
+  <script>
+    let port, writer, reader;
+
+    async function connectSerial() {
+      try {
+        port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 115200 });
+
+        const encoder = new TextEncoderStream();
+        const decoder = new TextDecoderStream();
+
+        port.readable.pipeTo(decoder.writable);
+        encoder.readable.pipeTo(port.writable);
+
+        writer = encoder.writable.getWriter();
+        reader = decoder.readable.getReader();
+
+        readLoop();
+        log("Connected to device.\n");
+      } catch (e) {
+        log("Error: " + e + "\n");
+      }
+    }
+
+    async function readLoop() {
+      while (true) {
+        try {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (value) log(value);
+        } catch (e) {
+          log("Read error: " + e + "\n");
+          break;
+        }
+      }
+    }
+
+    function log(msg) {
+      const output = document.getElementById("output");
+      output.textContent += msg;
+      output.scrollTop = output.scrollHeight;
+    }
+
+    async function sendRaw(data) {
+      await writer.write(data);
+    }
+
+    async function sendControlByte(byte) {
+      const control = new Uint8Array([byte]);
+      await port.write(control);
+    }
+
+    async function uploadFile() {
+      const filename = document.getElementById("filename").value.trim();
+      const code = document.getElementById("code").value;
+
+      if (!filename) {
+        log("Filename cannot be empty.\n");
+        return;
+      }
+
+      const uploadScript = `
+import sys
+with open("${filename}", "w") as f:
+    while True:
+        line = sys.stdin.readline()
+        if line.strip() == "<<<END>>>":
+            break
+        f.write(line)
+`;
+
+      await sendControlByte(0x01); // Ctrl-A (raw REPL)
+      await new Promise(r => setTimeout(r, 100));
+      await sendRaw(uploadScript);
+      await sendControlByte(0x04); // Ctrl-D (execute)
+      await new Promise(r => setTimeout(r, 100));
+
+      const lines = code.split("\n");
+      for (let line of lines) {
+        await sendRaw(line + "\n");
+      }
+      await sendRaw("<<<END>>>\n");
+      await sendControlByte(0x02); // Ctrl-B (exit raw REPL)
+    }
+
+    async function runFile() {
+      const filename = document.getElementById("filename").value.trim();
+      if (!filename) {
+        log("Filename cannot be empty.\n");
+        return;
+      }
+      await sendRaw(`exec(open(\"${filename}\").read())\n`);
+    }
+
+    async function listFiles() {
+      document.getElementById("file-list").textContent = "";
+      await sendRaw("import os\nprint(os.listdir())\n");
+    }
+
+    document.getElementById("connect").addEventListener("click", connectSerial);
+    document.getElementById("upload").addEventListener("click", uploadFile);
+    document.getElementById("run").addEventListener("click", runFile);
+    document.getElementById("list-files").addEventListener("click", listFiles);
+  </script>
+</body>
+</html>
