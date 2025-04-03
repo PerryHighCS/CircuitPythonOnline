@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CPX WebSerial Console (Raw REPL Mode)</title>
+  <title>CPX WebSerial Console</title>
   <style>
     body { font-family: sans-serif; padding: 1rem; }
     textarea, pre, input, button { width: 100%; margin-top: 0.5rem; font-family: monospace; }
@@ -16,7 +16,6 @@
   </style>
 </head>
 <body>
-  <h1>Circuit Playground WebSerial - Raw REPL</h1>
   <button id="connect">Connect to Circuit Playground</button>
   <br>
   <label for="filename">Filename:</label>
@@ -110,7 +109,7 @@ pixels.fill((0, 0, 255))</textarea>
             await ensureREPL();
 
             setStatus("Reconnected to device");
-            
+
             break;
           }
         } catch (e) {
