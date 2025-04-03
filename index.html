@@ -6,10 +6,26 @@
   <title>CPX WebSerial Console</title>
   <style>
     body { font-family: sans-serif; padding: 1rem; }
-    textarea, pre, input, button { width: 100%; margin-top: 0.5rem; font-family: monospace; }
+    textarea, pre, input, button {
+      width: 100%;
+      margin-top: 0.5rem;
+      font-family: monospace;
+      opacity: 1;
+      transition: opacity 0.2s ease;
+    }
     textarea { height: 200px; }
     pre { height: 200px; overflow-y: auto; background: #f0f0f0; padding: 1rem; }
-    #file-list { font-size: 0.9rem; background: #e8e8e8; padding: 0.5rem; margin-top: 1rem; }
+    #file-list {
+      font-size: 0.9rem;
+      background: #e8e8e8;
+      padding: 0.5rem;
+      margin-top: 1rem;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
   
     #status-bar { background: #eef; padding: 0.5rem; margin-top: 1rem; font-size: 0.9rem; }
     #status-bar::before { content: "Status: "; font-weight: bold; }  
@@ -24,14 +40,14 @@
   <textarea id="code">import board, neopixel
 pixels = neopixel.NeoPixel(board.NEOPIXEL, 10)
 pixels.fill((0, 0, 255))</textarea>
-  <button id="upload">Upload File</button>
-  <button id="run">Run File</button>
+  <button id="upload" disabled>Upload File</button>
+  <button id="run" disabled>Run File</button>
   <div id="status-bar">Disconnected</div>
   <h3>Device Output:</h3>
   <pre id="output"></pre>
 
   <h3>Files on Device (Experimental)</h3>
-  <button id="list-files">List Files</button>
+  <button id="list-files" disabled>List Files</button>
   <pre id="file-list"></pre>
 
 
@@ -40,6 +56,7 @@ pixels.fill((0, 0, 255))</textarea>
     const CTRL_B = 0x02; // Exit raw REPL
     const CTRL_C = 0x03; // Break
     const CTRL_D = 0x04; // Execute
+    
     let port, writer, reader;
     let outputBuffer = "";
 
@@ -105,11 +122,11 @@ pixels.fill((0, 0, 255))</textarea>
             outputBuffer = "";
             readLoop();
 
-            await new Promise(r => setTimeout(r, 250));
+            await new Promise(r => setTimeout(r, 500));
             await ensureREPL();
 
             setStatus("Reconnected to device");
-
+            
             break;
           }
         } catch (e) {
@@ -132,7 +149,7 @@ pixels.fill((0, 0, 255))</textarea>
           setStatus("Read error: " + e);
           if (e instanceof DOMException && e.name === "NetworkError") {
             monitorPortDisconnect();
-          } // ✅ trigger reconnect attempt
+          }
           break;
         }
       }
@@ -145,6 +162,20 @@ pixels.fill((0, 0, 255))</textarea>
     }
 
     function setStatus(message) {
+  const uploadBtn = document.getElementById("upload");
+  const runBtn = document.getElementById("run");
+  const listBtn = document.getElementById("list-files");
+
+  if (message.startsWith("Connected") || message.startsWith("Reconnected")) {
+    uploadBtn.disabled = false;
+    runBtn.disabled = false;
+    listBtn.disabled = false;
+  } else if (message.startsWith("Disconnected") || message.includes("failed") || message.includes("Waiting")) {
+    uploadBtn.disabled = true;
+    runBtn.disabled = true;
+    listBtn.disabled = true;
+  }
+
       const status = document.getElementById("status-bar");
       status.textContent = message;
     }
