@@ -74,7 +74,7 @@ Once authorized, the board can reconnect automatically on page load.
 
 ## 🧠 Author Notes
 
-Built as a classroom tool by a computer science educator using CircuitPython in high school settings. Inspired by the need for a simplified, student-friendly development flow.
+Built as a classroom tool by a computer science educator using CircuitPython in high school settings. Inspired by the need for a simplified, student-friendly development flow. Testing chatGPT's code generation and debugging capabilities.
 
 ## 📝 License
 
