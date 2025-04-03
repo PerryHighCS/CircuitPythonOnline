@@ -26,21 +26,35 @@
 
   <style>
     body { font-family: sans-serif; padding: 1rem; }
+    #button-bar {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 0px;
+      margin-bottom: 1rem;
+    }
+
+    #button-bar button {
+      flex: 1;
+      padding: 0.5rem;
+      font-size: 1rem;
+    }
+
     pre, input, button {
-      width: 100%;
+      /* width: 100%; */
       margin-top: 0.5rem;
       font-family: monospace;
       opacity: 1;
       transition: opacity 0.2s ease;
     }
-    pre { overflow-y: auto; background: #f0f0f0; padding: 1rem; }
-    #file-list {
-      font-size: 0.9rem;
-      background: #e8e8e8;
-      padding: 0.5rem;
-      margin-top: 1rem;
+    #output {
+      height: auto;
+      max-height: 400px;
+      min-height: 1rem;
+      overflow-y: auto;
+      background: #f0f0f0;
+      padding: 1rem;
     }
-
+    
     button:disabled {
       opacity: 0.5;
       cursor: not-allowed;
@@ -51,23 +65,23 @@
   </style>
 </head>
 <body>
-  <button id="connect">Connect to Circuit Playground</button>
-  <br>
+  <div id="button-bar">
+    <button id="connect">🔌 Connect</button>
+    <button id="upload" disabled>📤 Upload</button>
+    <button id="run" disabled>▶️ Run</button>
+    <div style="flex: 1;"></div>
+    <button id="list-files" disabled>📂 List Files</button>
+    <button id="cleanup" disabled>🧹 Clean Up</button>
+  </div>
+  
   <label for="filename">Filename:</label>
   <input type="text" id="filename" value="sample.py">
   <textarea id="code">import board, neopixel
 pixels = neopixel.NeoPixel(board.NEOPIXEL, 10)
 pixels.fill((0, 0, 255))</textarea>
- 
-  <button id="upload" disabled>Upload File</button>
-  <button id="run" disabled>Run File</button>
   <div id="status-bar">Disconnected</div>
   <h3>Device Output:</h3>
   <pre id="output"></pre>
-
-  <h3>Files on Device (Experimental)</h3>
-  <button id="list-files" disabled>List Files</button>
-  <button id="cleanup" disabled>Clean Up Files</button>
 
   <script>
     // Control characters for REPL communication
@@ -105,7 +119,7 @@ pixels.fill((0, 0, 255))</textarea>
         readLoopPromise = readLoop();
 
         setStatus("Connected");
-        document.getElementById("connect").textContent = "Disconnect";
+        document.getElementById("connect").textContent = "❌ Disconnect";
       } catch (e) {
         setStatus("Error: " + e)
       }
@@ -166,7 +180,7 @@ pixels.fill((0, 0, 255))</textarea>
       readLoopPromise = null;
 
       setStatus("Disconnected");
-      document.getElementById("connect").textContent = "Connect to Circuit Playground";
+      document.getElementById("connect").textContent = "🔌 Connect";
 
       return true;
     }
@@ -295,7 +309,7 @@ pixels.fill((0, 0, 255))</textarea>
         runBtn.disabled = false;
         listBtn.disabled = false;
         cleanupBtn.disabled = false;
-        connectBtn.textContent = "Disconnect";
+        connectBtn.textContent = "❌ Disconnect";
       } 
       else if (message.startsWith("Disconnected") || message.includes("failed") || message.includes("Waiting")) {
         uploadBtn.disabled = true;
