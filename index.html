@@ -48,15 +48,14 @@ pixels.fill((0, 0, 255))</textarea>
 
   <h3>Files on Device (Experimental)</h3>
   <button id="list-files" disabled>List Files</button>
-  <pre id="file-list"></pre>
-
+  <button id="cleanup" disabled>Clean Up Files</button>
 
   <script>
     const CTRL_A = 0x01; // Enter raw REPL
     const CTRL_B = 0x02; // Exit raw REPL
     const CTRL_C = 0x03; // Break
     const CTRL_D = 0x04; // Execute
-    
+
     let port, writer, reader;
     let outputBuffer = "";
 
@@ -162,19 +161,23 @@ pixels.fill((0, 0, 255))</textarea>
     }
 
     function setStatus(message) {
-  const uploadBtn = document.getElementById("upload");
-  const runBtn = document.getElementById("run");
-  const listBtn = document.getElementById("list-files");
+      const uploadBtn = document.getElementById("upload");
+      const runBtn = document.getElementById("run");
+      const listBtn = document.getElementById("list-files");
+      const cleanupBtn = document.getElementById("cleanup")
 
-  if (message.startsWith("Connected") || message.startsWith("Reconnected")) {
-    uploadBtn.disabled = false;
-    runBtn.disabled = false;
-    listBtn.disabled = false;
-  } else if (message.startsWith("Disconnected") || message.includes("failed") || message.includes("Waiting")) {
-    uploadBtn.disabled = true;
-    runBtn.disabled = true;
-    listBtn.disabled = true;
-  }
+
+      if (message.startsWith("Connected") || message.startsWith("Reconnected")) {
+        uploadBtn.disabled = false;
+        runBtn.disabled = false;
+        listBtn.disabled = false;
+        cleanupBtn.disabled = false;
+      } else if (message.startsWith("Disconnected") || message.includes("failed") || message.includes("Waiting")) {
+        uploadBtn.disabled = true;
+        runBtn.disabled = true;
+        listBtn.disabled = true;
+        cleanupBtn.disabled = true;
+      }
 
       const status = document.getElementById("status-bar");
       status.textContent = message;
@@ -294,10 +297,57 @@ with open("${filename}", "w") as f:
       await send("import os\r\nprint(os.listdir())\r\n");
     }
 
+    async function cleanupFiles() {
+      if (!await ensureREPL()) {
+        setStatus("Failed to get REPL prompt");
+        return;
+      }
+
+      const cleanupScript = `
+import os
+
+def delete_recursive(path):
+    clean = True
+    try:
+        for item in os.listdir(path):
+            full = path + "/" + item if path != "/" else "/" + item
+            try:
+                if os.stat(full)[0] & 0x4000:  # directory
+                    if delete_recursive(full):
+                        os.rmdir(full)
+                    else:
+                        clean = False
+                else:
+                    mode = os.stat(full)[0]
+                    if mode & 0o200:
+                        os.remove(full)
+                    else:
+                        clean = False
+            except OSError:
+                clean = False
+    except OSError:
+        clean = False
+    return clean
+
+delete_recursive("/")
+`;
+
+      await sendControlByte(CTRL_A);
+      await new Promise(r => setTimeout(r, 100));
+      await send(cleanupScript);
+      await sendControlByte(CTRL_D);
+      await new Promise(r => setTimeout(r, 200));
+      await sendControlByte(CTRL_B);
+      setStatus("Cleanup completed (non-read-only files removed)");
+}
+
+
     document.getElementById("connect").addEventListener("click", connectSerial);
     document.getElementById("upload").addEventListener("click", uploadFile);
     document.getElementById("run").addEventListener("click", runFile);
     document.getElementById("list-files").addEventListener("click", listFiles);
+    document.getElementById("cleanup").addEventListener("click", cleanupFiles);
+
   </script>
 </body>
 </html>
