@@ -22,7 +22,7 @@ This project allows students to write and execute CircuitPython code from a brow
 
 ## 🧠 Why This Project?
 
-This tool replaces a JavaScript-based Circuit Playground classroom tool and uses CircuitPython directly. It's designed to support a classroom workflow where:
+This tool is a proof-of-concept replacing Code.org's JavaScript/firmata based Circuit Playground tool and uses CircuitPython directly. It's designed to support a classroom workflow where:
 
 - Students write small programs in-browser
 - The code is sent to the CPX and executed
@@ -53,9 +53,9 @@ The frontend handles all serial control characters required for CircuitPython RE
 
 ## 📦 File Structure
 
-/index.html // Main frontend and all JS logic 
-/boot.py    // Minimal boot.py for CPX that hides the CIRCUITPY drive
-/README.md  // This file
+- /index.html // Main frontend and all JS logic 
+- /boot.py    // Minimal boot.py for CPX that hides the CIRCUITPY drive
+
 
 ## 🔐 Permissions and Setup
 
