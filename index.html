@@ -144,7 +144,6 @@ pixels.fill((0, 0, 255))</textarea>
       return true;
     }
 
-
     async function monitorPortDisconnect() {
       try {
         while (port.readable && port.readable.locked) {
@@ -237,7 +236,6 @@ pixels.fill((0, 0, 255))</textarea>
         }
       }
     }
-
 
     function delay(ms) {
       return new Promise(resolve => setTimeout(resolve, ms));
