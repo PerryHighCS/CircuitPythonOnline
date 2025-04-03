@@ -51,17 +51,20 @@ pixels.fill((0, 0, 255))</textarea>
   <button id="cleanup" disabled>Clean Up Files</button>
 
   <script>
+    // Control characters for REPL communication
     const CTRL_A = 0x01; // Enter raw REPL
     const CTRL_B = 0x02; // Exit raw REPL
-    const CTRL_C = 0x03; // Break
-    const CTRL_D = 0x04; // Execute
+    const CTRL_C = 0x03; // Interrupt (break)
+    const CTRL_D = 0x04; // Execute buffer
 
-    let port, writer, reader, decoder;
-    let pipePromise;
-    let outputBuffer = "";
-    let stopReading = false;
+    // USB serial and stream objects
+    let port, reader, writer, decoder, pipePromise;
     let readLoopPromise = null;
+    let outputBuffer = ""; // Stores terminal output for prompt detection
+    let stopReading = false; // Used to cancel the read loop cleanly
 
+    // Requests a port from the browser and sets up text decoding,
+    // reader/writer streams, and the read loop.
     async function connectSerial(connectTo = null) {
       try {
         port = connectTo ? connectTo : await navigator.serial.requestPort();
@@ -87,6 +90,9 @@ pixels.fill((0, 0, 255))</textarea>
       }
     }
 
+    // Cleanly disconnects from the current serial port. 
+    // Cancels and releases the reader/writer, aborts the decoder pipeline,
+    // and closes the port.
     async function disconnectPort() {
       if (!port) return false; // No port to disconnect
 
@@ -144,6 +150,8 @@ pixels.fill((0, 0, 255))</textarea>
       return true;
     }
 
+    // Triggered on read error. 
+    // Waits for the port to unlock, then closes and initiates reconnect loop.
     async function monitorPortDisconnect() {
       try {
         while (port.readable && port.readable.locked) {
@@ -179,6 +187,8 @@ pixels.fill((0, 0, 255))</textarea>
       }
     }
 
+    // Automatically tries to reconnect if the device is unplugged or reset.
+    // Loops every second until a previously authorized port is available.
     async function reconnectLoop() {
       while (!stopReading) {
         try {
@@ -209,6 +219,8 @@ pixels.fill((0, 0, 255))</textarea>
       }
     }
 
+    // Continuously reads characters from the REPL and appends them to the output.
+    // Stops on disconnect or errors. Also detects loss of connection.
     async function readLoop() {
       stopReading = false;
       try {
@@ -237,16 +249,19 @@ pixels.fill((0, 0, 255))</textarea>
       }
     }
 
+    // Utility to pause async flow for a specified duration.
     function delay(ms) {
       return new Promise(resolve => setTimeout(resolve, ms));
     }
 
+    // Appends output to the on-screen terminal.
     function log(msg) {
       const output = document.getElementById("output");
       output.textContent += msg;
       output.scrollTop = output.scrollHeight;
     }
 
+    // Updates the status bar and enables/disables UI buttons depending on connection state.
     function setStatus(message) {
       const uploadBtn = document.getElementById("upload");
       const runBtn = document.getElementById("run");
@@ -273,6 +288,7 @@ pixels.fill((0, 0, 255))</textarea>
       status.textContent = message;
     }
 
+    // Encodes a string and sends it over the serial connection.
     async function send(data) {
       try {
         const encoded = new TextEncoder().encode(data);
@@ -282,6 +298,7 @@ pixels.fill((0, 0, 255))</textarea>
       }
     }
 
+    // Sends a single control character (like CTRL_A) over the serial connection.
     async function sendControlByte(byte) {
       try {
         await writer.write(new Uint8Array([byte]));
@@ -290,6 +307,7 @@ pixels.fill((0, 0, 255))</textarea>
       }
     }
 
+    // Monitors the outputBuffer for a >>> REPL prompt within a timeout.
     async function checkForPrompt(timeoutMs = 300) {
       return await new Promise(resolve => {
         const start = Date.now();
@@ -305,6 +323,7 @@ pixels.fill((0, 0, 255))</textarea>
       });
     }
 
+    // Wakes up the REPL by sending newline or Ctrl-C until the >>> prompt appears.
     async function ensureREPL() {
       try {
         for (let attempt = 0; attempt < 3; attempt++) {
@@ -331,6 +350,7 @@ pixels.fill((0, 0, 255))</textarea>
       }
     }
 
+    // Sends a helper program to receive file data, then transmits the file code.
     async function uploadFile() {
       if (!await ensureREPL()) {
         setStatus("Failed to get REPL prompt")
@@ -370,6 +390,8 @@ with open("${filename}", "w") as f:
       setStatus("File uploaded successfully.\n");
     }
 
+    // Sends exec(open(filename).read()) to run a previously
+    // uploaded file and waits for REPL prompt to return.
     async function runFile() {
       if (!await ensureREPL()) {
         setStatus("Failed to get REPL prompt")
@@ -393,7 +415,7 @@ with open("${filename}", "w") as f:
       }
     }
 
-
+    // Runs os.listdir() on the REPL and prints the result to the terminal.
     async function listFiles() {
       if (!await ensureREPL()) {
         setStatus("Failed to get REPL prompt");
@@ -404,6 +426,8 @@ with open("${filename}", "w") as f:
       await send("import os\r\nprint(os.listdir())\r\n");
     }
 
+    // Uploads and executes a script that recursively deletes all files
+    // and folders that aren't read-only.
     async function cleanupFiles() {
       if (!await ensureREPL()) {
         setStatus("Failed to get REPL prompt");
@@ -447,6 +471,8 @@ delete_recursive("/")
       setStatus("Cleanup completed (non-read-only files removed)");
     }
 
+    // On page load, automatically attempts to connect to the first available port if
+    // one has previously been authorized.
     window.addEventListener("DOMContentLoaded", async () => {
       const ports = await navigator.serial.getPorts();
       if (ports.length > 0) {
