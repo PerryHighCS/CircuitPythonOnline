@@ -10,6 +10,9 @@
     textarea { height: 200px; }
     pre { height: 200px; overflow-y: auto; background: #f0f0f0; padding: 1rem; }
     #file-list { font-size: 0.9rem; background: #e8e8e8; padding: 0.5rem; margin-top: 1rem; }
+  
+    #status-bar { background: #eef; padding: 0.5rem; margin-top: 1rem; font-size: 0.9rem; }
+    #status-bar::before { content: "Status: "; font-weight: bold; }  
   </style>
 </head>
 <body>
@@ -17,14 +20,14 @@
   <button id="connect">Connect to Circuit Playground</button>
   <br>
   <label for="filename">Filename:</label>
-  <input type="text" id="filename" value="sample.py">
-  <label for="code">Code:</label>
+  <input type="text" id="filename" value="student_code.py">
+  <label for="code">Student Code:</label>
   <textarea id="code">import board, neopixel
-pixels = neopixel.NeoPixel(board.NEOPIXEL, 10, brightness=.2)
-pixels.fill((0, 0, 255))
-print('Circuit Playground Express')</textarea>
+pixels = neopixel.NeoPixel(board.NEOPIXEL, 10)
+pixels.fill((0, 0, 255))</textarea>
   <button id="upload">Upload File</button>
-  <button id="run">Run Code</button>
+  <button id="run">Run File</button>
+  <div id="status-bar">Disconnected</div>
   <h3>Device Output:</h3>
   <pre id="output"></pre>
 
@@ -32,27 +35,88 @@ print('Circuit Playground Express')</textarea>
   <button id="list-files">List Files</button>
   <pre id="file-list"></pre>
 
+
   <script>
+    const CTRL_A = 0x01; // Enter raw REPL
+    const CTRL_B = 0x02; // Exit raw REPL
+    const CTRL_C = 0x03; // Break
+    const CTRL_D = 0x04; // Execute
     let port, writer, reader;
+    let outputBuffer = "";
 
     async function connectSerial() {
       try {
         port = await navigator.serial.requestPort();
         await port.open({ baudRate: 115200 });
 
-        const encoder = new TextEncoderStream();
         const decoder = new TextDecoderStream();
-
         port.readable.pipeTo(decoder.writable);
-        encoder.readable.pipeTo(port.writable);
-
-        writer = encoder.writable.getWriter();
         reader = decoder.readable.getReader();
 
+        writer = port.writable.getWriter();
+
         readLoop();
-        log("Connected to device.\n");
+        setStatus("Connected")
       } catch (e) {
-        log("Error: " + e + "\n");
+        setStatus("Error: " + e)
+      }
+    }
+
+    async function monitorPortDisconnect() {
+      try {
+        while (port.readable && port.readable.locked) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+        setStatus("Device disconnected. Attempting to reconnect...");
+        if (reader) {
+          try {
+            reader.cancel();
+            await reader.releaseLock();
+          } catch (e) {
+            console.warn("Failed to release reader:", e);
+          }
+        }
+        if (writer) {
+          try {
+            await writer.releaseLock();
+          } catch (e) {
+            console.warn("Failed to release writer:", e);
+          }
+        }
+        await port.close();
+        await reconnectLoop();
+      } catch (e) {
+        setStatus("Auto-reconnect failed: " + e);
+      }
+    }
+
+    async function reconnectLoop() {
+      while (true) {
+        try {
+          const ports = await navigator.serial.getPorts();
+          if (ports.length > 0) {
+            port = ports[0];
+            await port.open({ baudRate: 115200 });
+
+            const decoder = new TextDecoderStream();
+            port.readable.pipeTo(decoder.writable);
+            reader = decoder.readable.getReader();
+            writer = port.writable.getWriter();
+
+            outputBuffer = "";
+            readLoop();
+
+            await new Promise(r => setTimeout(r, 250));
+            await ensureREPL();
+
+            setStatus("Reconnected to device");
+            
+            break;
+          }
+        } catch (e) {
+          setStatus("Waiting to reconnect...");
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
 
@@ -61,9 +125,15 @@ print('Circuit Playground Express')</textarea>
         try {
           const { value, done } = await reader.read();
           if (done) break;
-          if (value) log(value);
+          if (value) {
+            outputBuffer += value;
+            log(value);
+          }
         } catch (e) {
-          log("Read error: " + e + "\n");
+          setStatus("Read error: " + e);
+          if (e instanceof DOMException && e.name === "NetworkError") {
+            monitorPortDisconnect();
+          } // ✅ trigger reconnect attempt
           break;
         }
       }
@@ -75,21 +145,67 @@ print('Circuit Playground Express')</textarea>
       output.scrollTop = output.scrollHeight;
     }
 
-    async function sendRaw(data) {
-      await writer.write(data);
+    function setStatus(message) {
+      const status = document.getElementById("status-bar");
+      status.textContent = message;
+    }
+
+    async function send(data) {
+      const encoded = new TextEncoder().encode(data);
+      await writer.write(encoded);
     }
 
     async function sendControlByte(byte) {
-      const control = new Uint8Array([byte]);
-      await port.write(control);
+      await writer.write(new Uint8Array([byte]));
+    }
+
+    async function checkForPrompt(timeoutMs = 300) {
+      return await new Promise(resolve => {
+        const start = Date.now();
+        const interval = setInterval(() => {
+          if (outputBuffer.includes(">>>")) {
+            clearInterval(interval);
+            resolve(true);
+          } else if (Date.now() - start > timeoutMs) {
+            clearInterval(interval);
+            resolve(false);
+          }
+        }, 25);
+      });
+    }
+
+    async function ensureREPL() {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        outputBuffer = ""; // Clear buffer before each attempt
+
+        setStatus(`Checking for REPL prompt (attempt ${attempt + 1})...\n`);
+        await send("\r\n");
+        await new Promise(r => setTimeout(r, 100));
+        const hasPrompt = await checkForPrompt();
+        if (hasPrompt) return true;
+
+        setStatus("Prompt not found, sending Ctrl-C...\n");
+        await sendControlByte(CTRL_C); // Break
+        await new Promise(r => setTimeout(r, 100));
+        const afterCtrlCPrompt = await checkForPrompt();
+        if (afterCtrlCPrompt) return true;
+      }
+
+      setStatus("REPL prompt not detected after multiple attempts.\n");
+      return false;
     }
 
     async function uploadFile() {
+      if (!await ensureREPL()) {
+        setStatus("Failed to get REPL prompt")
+        return;
+      };
+
       const filename = document.getElementById("filename").value.trim();
       const code = document.getElementById("code").value;
 
       if (!filename) {
-        log("Filename cannot be empty.\n");
+        setStatus("Filename required")
         return;
       }
 
@@ -103,32 +219,49 @@ with open("${filename}", "w") as f:
         f.write(line)
 `;
 
-      await sendControlByte(0x01); // Ctrl-A (raw REPL)
+      await sendControlByte(CTRL_A); // Ctrl-A (raw REPL)
       await new Promise(r => setTimeout(r, 100));
-      await sendRaw(uploadScript);
-      await sendControlByte(0x04); // Ctrl-D (execute)
+      await send(uploadScript);
+      await sendControlByte(CTRL_D); // Ctrl-D (execute)
       await new Promise(r => setTimeout(r, 100));
 
       const lines = code.split("\n");
       for (let line of lines) {
-        await sendRaw(line + "\n");
+        await send(line + "\n");
       }
-      await sendRaw("<<<END>>>\n");
-      await sendControlByte(0x02); // Ctrl-B (exit raw REPL)
+      await send("<<<END>>>\n");
+      await sendControlByte(CTRL_B); // Ctrl-B (exit raw REPL)
+      setStatus("File uploaded successfully.\n");
     }
 
     async function runFile() {
+      if (!await ensureREPL()) {
+        setStatus("Failed to get REPL prompt")
+        return;
+      };
+
       const filename = document.getElementById("filename").value.trim();
       if (!filename) {
-        log("Filename cannot be empty.\n");
+        setStatus("Filename cannot be empty.\n");
         return;
       }
-      await sendRaw(`exec(open(\"${filename}\").read())\n`);
+      setStatus(`Running file: ${filename}\n`);
+      await send(`exec(open("${filename}").read())\r\n`);
+
+      // Wait for program to finish by checking for REPL prompt
+      const completed = await checkForPrompt(2000);
+      if (completed) {
+        setStatus("Program finished");
+      } else {
+        setStatus("Program still running or no prompt detected");
+      }
     }
+
 
     async function listFiles() {
       document.getElementById("file-list").textContent = "";
-      await sendRaw("import os\nprint(os.listdir())\n");
+      await ensureREPL();
+      await send("import os\r\nprint(os.listdir())\r\n");
     }
 
     document.getElementById("connect").addEventListener("click", connectSerial);
