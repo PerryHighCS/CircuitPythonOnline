@@ -4,17 +4,36 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>CPX WebSerial Console</title>
+
+  <!-- CodeMirror 5 CSS and JS (Python mode included) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.14/lib/codemirror.css">
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.14/lib/codemirror.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.14/mode/python/python.js"></script>
+
+  <!-- Theme (optional) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.14/theme/cobalt.css">
+  <style>
+    .CodeMirror {
+      height: 400px;
+      min-height: 200px;
+      max-height: 400px;
+      margin-top: 0.5rem;
+      border: 1px solid #ccc;
+      font-family: monospace;
+      font-size: 14px;
+    }
+  </style>
+
   <style>
     body { font-family: sans-serif; padding: 1rem; }
-    textarea, pre, input, button {
+    pre, input, button {
       width: 100%;
       margin-top: 0.5rem;
       font-family: monospace;
       opacity: 1;
       transition: opacity 0.2s ease;
     }
-    textarea { height: 200px; }
-    pre { height: 200px; overflow-y: auto; background: #f0f0f0; padding: 1rem; }
+    pre { overflow-y: auto; background: #f0f0f0; padding: 1rem; }
     #file-list {
       font-size: 0.9rem;
       background: #e8e8e8;
@@ -36,10 +55,10 @@
   <br>
   <label for="filename">Filename:</label>
   <input type="text" id="filename" value="sample.py">
-  <label for="code">Student Code:</label>
   <textarea id="code">import board, neopixel
 pixels = neopixel.NeoPixel(board.NEOPIXEL, 10)
 pixels.fill((0, 0, 255))</textarea>
+ 
   <button id="upload" disabled>Upload File</button>
   <button id="run" disabled>Run File</button>
   <div id="status-bar">Disconnected</div>
@@ -62,6 +81,8 @@ pixels.fill((0, 0, 255))</textarea>
     let readLoopPromise = null;
     let outputBuffer = ""; // Stores terminal output for prompt detection
     let stopReading = false; // Used to cancel the read loop cleanly
+    
+    let codeEditor; // CodeMirror editor instance
 
     // Requests a port from the browser and sets up text decoding,
     // reader/writer streams, and the read loop.
@@ -358,7 +379,8 @@ pixels.fill((0, 0, 255))</textarea>
       };
 
       const filename = document.getElementById("filename").value.trim();
-      const code = document.getElementById("code").value;
+      const code = codeEditor.getValue();
+
 
       if (!filename) {
         setStatus("Filename required")
@@ -470,10 +492,19 @@ delete_recursive("/")
       await sendControlByte(CTRL_B);
       setStatus("Cleanup completed (non-read-only files removed)");
     }
-
-    // On page load, automatically attempts to connect to the first available port if
-    // one has previously been authorized.
+    
     window.addEventListener("DOMContentLoaded", async () => {
+      // Initialize the code editor
+      codeEditor = CodeMirror.fromTextArea(document.getElementById("code"), {
+        mode: "python",
+        lineNumbers: true,
+        indentUnit: 4,
+        theme: "cobalt",
+        autofocus: true
+      });
+        
+      // On page load, automatically attempt to connect to the first available port if
+      // one has previously been authorized.
       const ports = await navigator.serial.getPorts();
       if (ports.length > 0) {
         port = ports[0];
